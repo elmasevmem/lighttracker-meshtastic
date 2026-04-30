@@ -37,21 +37,29 @@ jobs:
           mkdir -p ~/.platformio/boards
           cp variant-repo/boards/light_tracker_plus_v1.json ~/.platformio/boards/
 
-      # 4. pins_arduino.h'ı Arduino core'a koy
-      #    (framework-arduinoespressif32 henüz indirilmedi, PlatformIO onu
-      #     ilk build'de indirir. Workaround: önce pio platform install çalıştır)
-      - name: Install ESP32 Arduino core via PlatformIO
+      # 4. PlatformIO kur ve sadece ESP32 framework paketini direkt indir.
+      #    "pio pkg install --platform espressif32" Meshtastic ana platformio.ini'sini
+      #    okuyarak rpipico gibi kurulu olmayan board'ları çözmeye çalışır → hata.
+      #    Bunun yerine framework paketini doğrudan pio pkg install --tool ile kuruyoruz.
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Install ESP32 Arduino framework package directly
         run: |
-          pip install platformio
-          cd firmware
-          pio pkg install --platform espressif32
+          # Sadece framework-arduinoespressif32 paketini indir, board resolution yok
+          pio pkg install --global --tool "platformio/framework-arduinoespressif32"
 
       - name: Install pins_arduino.h into Arduino core
         run: |
           CORE=$(find ~/.platformio -type d -name "framework-arduinoespressif32" | head -1)
           echo "Core path: $CORE"
+          if [ -z "$CORE" ]; then
+            echo "ERROR: framework-arduinoespressif32 bulunamadı!"
+            exit 1
+          fi
           mkdir -p "$CORE/variants/light_tracker_plus_v1"
           cp variant-repo/arduino-core/pins_arduino.h "$CORE/variants/light_tracker_plus_v1/"
+          echo "pins_arduino.h kopyalandı: $CORE/variants/light_tracker_plus_v1/"
 
       # 5. Variant dosyalarını firmware reposuna koy
       - name: Copy variant files into firmware
