@@ -5,10 +5,11 @@ on:
     branches: [ main, master ]
     paths:
       - 'variants/light_tracker_plus/**'
+      - 'arduino-core/**'
       - '.github/workflows/build.yml'
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:        # Elle tetikleme butonu
+  workflow_dispatch:
 
 jobs:
   build:
@@ -37,36 +38,28 @@ jobs:
           mkdir -p ~/.platformio/boards
           cp variant-repo/boards/light_tracker_plus_v1.json ~/.platformio/boards/
 
-      # 4. PlatformIO kur ve sadece ESP32 framework paketini direkt indir.
-      #    "pio pkg install --platform espressif32" Meshtastic ana platformio.ini'sini
-      #    okuyarak rpipico gibi kurulu olmayan board'ları çözmeye çalışır → hata.
-      #    Bunun yerine framework paketini doğrudan pio pkg install --tool ile kuruyoruz.
+      # 4. PlatformIO kur.
+      #    pins_arduino.h artık repo içinde
+      #    arduino-core/variants/light_tracker_plus_v1/ altında duruyor.
+      #    platformio.ini'deki board_build.variants_dir bu klasörü gösteriyor,
+      #    framework'e elle kopyalamaya gerek yok.
       - name: Install PlatformIO
         run: pip install platformio
 
-      - name: Install ESP32 Arduino framework package directly
-        run: |
-          # Sadece framework-arduinoespressif32 paketini indir, board resolution yok
-          pio pkg install --global --tool "platformio/framework-arduinoespressif32"
-
-      - name: Install pins_arduino.h into Arduino core
-        run: |
-          CORE=$(find ~/.platformio -type d -name "framework-arduinoespressif32" | head -1)
-          echo "Core path: $CORE"
-          if [ -z "$CORE" ]; then
-            echo "ERROR: framework-arduinoespressif32 bulunamadı!"
-            exit 1
-          fi
-          mkdir -p "$CORE/variants/light_tracker_plus_v1"
-          cp variant-repo/arduino-core/pins_arduino.h "$CORE/variants/light_tracker_plus_v1/"
-          echo "pins_arduino.h kopyalandı: $CORE/variants/light_tracker_plus_v1/"
-
-      # 5. Variant dosyalarını firmware reposuna koy
-      - name: Copy variant files into firmware
+      # 5. Variant dosyalarını firmware reposuna koy.
+      #    platformio.ini'deki $PROJECT_DIR firmware/ klasörünü gösterecek,
+      #    bu yüzden arduino-core klasörünü de oraya taşı.
+      - name: Copy variant and arduino-core files into firmware
         run: |
           mkdir -p firmware/variants/light_tracker_plus
-          cp variant-repo/variants/light_tracker_plus/variant.h   firmware/variants/light_tracker_plus/
+          cp variant-repo/variants/light_tracker_plus/variant.h     firmware/variants/light_tracker_plus/
           cp variant-repo/variants/light_tracker_plus/platformio.ini firmware/variants/light_tracker_plus/
+
+          # arduino-core/variants/ → firmware içine kopyala
+          # platformio.ini: board_build.variants_dir = $PROJECT_DIR/arduino-core/variants
+          mkdir -p firmware/arduino-core/variants/light_tracker_plus_v1
+          cp variant-repo/arduino-core/variants/light_tracker_plus_v1/pins_arduino.h \
+             firmware/arduino-core/variants/light_tracker_plus_v1/
 
       # 6. Derle
       - name: Build firmware
@@ -74,7 +67,7 @@ jobs:
           cd firmware
           pio run -e light-tracker-plus
 
-      # 7. Artifact olarak kaydet (indirilebilir .bin dosyası)
+      # 7. Artifact olarak kaydet
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
