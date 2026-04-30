@@ -1,0 +1,95 @@
+name: Build Meshtastic Firmware - LightTracker Plus
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'variants/light_tracker_plus/**'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:        # Elle tetikleme butonu
+
+jobs:
+  build:
+    name: Build firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Kendi reponu çek
+      - name: Checkout variant repo
+        uses: actions/checkout@v4
+        with:
+          path: variant-repo
+
+      # 2. Meshtastic firmware'i çek
+      - name: Checkout Meshtastic firmware
+        uses: actions/checkout@v4
+        with:
+          repository: meshtastic/firmware
+          ref: master
+          path: firmware
+          submodules: recursive
+
+      # 3. Board JSON'ını PlatformIO boards klasörüne koy
+      - name: Install board JSON
+        run: |
+          mkdir -p ~/.platformio/boards
+          cp variant-repo/boards/light_tracker_plus_v1.json ~/.platformio/boards/
+
+      # 4. pins_arduino.h'ı Arduino core'a koy
+      #    (framework-arduinoespressif32 henüz indirilmedi, PlatformIO onu
+      #     ilk build'de indirir. Workaround: önce pio platform install çalıştır)
+      - name: Install ESP32 Arduino core via PlatformIO
+        run: |
+          pip install platformio
+          cd firmware
+          pio pkg install --platform espressif32
+
+      - name: Install pins_arduino.h into Arduino core
+        run: |
+          CORE=$(find ~/.platformio -type d -name "framework-arduinoespressif32" | head -1)
+          echo "Core path: $CORE"
+          mkdir -p "$CORE/variants/light_tracker_plus_v1"
+          cp variant-repo/arduino-core/pins_arduino.h "$CORE/variants/light_tracker_plus_v1/"
+
+      # 5. Variant dosyalarını firmware reposuna koy
+      - name: Copy variant files into firmware
+        run: |
+          mkdir -p firmware/variants/light_tracker_plus
+          cp variant-repo/variants/light_tracker_plus/variant.h   firmware/variants/light_tracker_plus/
+          cp variant-repo/variants/light_tracker_plus/platformio.ini firmware/variants/light_tracker_plus/
+
+      # 6. Derle
+      - name: Build firmware
+        run: |
+          cd firmware
+          pio run -e light-tracker-plus
+
+      # 7. Artifact olarak kaydet (indirilebilir .bin dosyası)
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighttracker-plus-meshtastic-firmware
+          path: |
+            firmware/.pio/build/light-tracker-plus/firmware.bin
+            firmware/.pio/build/light-tracker-plus/firmware.elf
+          retention-days: 30
+
+      # 8. Tag'li push'larda otomatik Release oluştur
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            firmware/.pio/build/light-tracker-plus/firmware.bin
+          name: "LightTracker Plus Meshtastic ${{ github.ref_name }}"
+          body: |
+            LightTracker Plus v1.0 için Meshtastic firmware derlemesi.
+
+            **Flash etmek için:**
+            ```
+            esptool.py --chip esp32s3 --port /dev/ttyACM0 \
+              --baud 460800 write_flash 0x0 firmware.bin
+            ```
+            Veya [Meshtastic Web Flasher](https://flasher.meshtastic.org) ile custom firmware seçeneğini kullan.
